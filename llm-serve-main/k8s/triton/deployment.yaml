@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triton-trtllm
+  namespace: llm-serve
+  labels:
+    app: triton-trtllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: triton-trtllm
+  template:
+    metadata:
+      labels:
+        app: triton-trtllm
+    spec:
+      nodeSelector:
+        gpu-node: "true"
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: triton
+          # Triton 버전은 TRT-LLM backend 버전과 맞춰야 합니다.
+          # TRT-LLM backend 포함 이미지: nvcr.io/nvidia/tritonserver:24.12-trtllm-python-py3
+          # 기본 이미지 (backend 별도 설치 필요): nvcr.io/nvidia/tritonserver:24.12-py3
+          image: nvcr.io/nvidia/tritonserver:24.12-py3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+            - name: grpc
+              containerPort: 8001
+            - name: metrics
+              containerPort: 8002
+          command:
+            - tritonserver
+          args:
+            - --model-repository=/models
+            - --http-port=8000
+            - --grpc-port=8001
+            - --metrics-port=8002
+            - --log-verbose=1
+            - --model-control-mode=explicit   # 빈 model-repository로도 기동 가능, 모델은 load API로 명시적 로드
+          resources:
+            requests:
+              cpu: "8"
+              memory: 48Gi
+              nvidia.com/gpu: 2
+            limits:
+              cpu: "16"
+              memory: 96Gi
+              nvidia.com/gpu: 2
+          volumeMounts:
+            - name: model-repository
+              mountPath: /models
+            - name: shm
+              mountPath: /dev/shm
+          readinessProbe:
+            httpGet:
+              path: /v2/health/ready
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /v2/health/live
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+      volumes:
+        - name: model-repository
+          persistentVolumeClaim:
+            claimName: triton-model-repository-pvc
+          # model-repository 구조 예시:
+          # /models/
+          #   llama_trtllm/
+          #     1/
+          #       rank0.engine
+          #       rank1.engine
+          #     config.pbtxt
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Gi

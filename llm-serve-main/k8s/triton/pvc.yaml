@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: triton-model-repository-pvc
+  namespace: llm-serve
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 200Gi
+# 참고: ReadWriteOnce는 단일 Pod에서만 마운트 가능.
+# 여러 Triton Pod가 동일 모델을 공유하려면 EFS(ReadWriteMany)를 사용하고
+# storageClassName: efs-sc 로 변경하세요.
+# EFS CSI Driver 설치 필요: https://github.com/kubernetes-sigs/aws-efs-csi-driver

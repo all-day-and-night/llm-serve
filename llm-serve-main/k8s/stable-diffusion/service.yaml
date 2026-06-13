@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: stable-diffusion
+  namespace: llm-serve
+  labels:
+    app: stable-diffusion
+spec:
+  type: ClusterIP
+  selector:
+    app: stable-diffusion
+  ports:
+    - name: http
+      port: 7860
+      targetPort: 17860

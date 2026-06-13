@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sd-model-cache-pvc
+  namespace: llm-serve
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 50Gi
+# SD 1.5: ~4GB / SDXL 1.0: ~7GB / SDXL-Lightning: ~7GB
+# Pod 재시작 시 모델 재다운로드를 방지하기 위해 PVC 사용.
+# 두 replica가 동일 PVC를 공유하려면 EFS(ReadWriteMany) 필요.

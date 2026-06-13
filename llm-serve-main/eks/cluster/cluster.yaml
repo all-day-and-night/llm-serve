@@ -1,0 +1,19 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: ai-serving-gpu2-eks
+  region: ap-northeast-2
+  version: "1.30"
+  tags:
+    creator: dex.ju
+
+iam:
+  withOIDC: true  # IRSA 활성화 (EFS CSI, KEDA 등 향후 필요 시 사용)
+
+cloudWatch:
+  clusterLogging:
+    enableTypes:
+      - api
+      - audit
+      - authenticator

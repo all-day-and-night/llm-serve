@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stable-diffusion
+  namespace: llm-serve
+  labels:
+    app: stable-diffusion
+spec:
+  # GPU 1개씩 사용하는 2개 replica → 2 GPU 동시 활용, throughput 2x
+  # PVC는 ReadWriteOnce이므로 replicas: 1로 시작 후 EFS 전환 시 2로 증가
+  replicas: 1
+  selector:
+    matchLabels:
+      app: stable-diffusion
+  template:
+    metadata:
+      labels:
+        app: stable-diffusion
+    spec:
+      nodeSelector:
+        gpu-node: "true"
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      initContainers:
+        - name: fix-permissions
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /models/Stable-diffusion /models/VAE /models/Lora \
+                        /models/hypernetworks /models/ControlNet /models/ESRGAN
+              chmod -R 777 /models
+          volumeMounts:
+            - name: sd-models
+              mountPath: /models
+      containers:
+        - name: stable-diffusion
+          # ai-dock 이미지: A1111 + CUDA + xFormers 포함
+          # https://github.com/ai-dock/stable-diffusion-webui
+          image: ghcr.io/ai-dock/stable-diffusion-webui:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 17860
+          env:
+            - name: WEBUI_FLAGS
+              # 최적화 플래그:
+              # --api               : REST API 활성화 (필수)
+              # --nowebui           : Web UI 비활성화 (서버 모드)
+              # --xformers          : Memory-efficient attention, 10~40% 속도 향상
+              # --opt-sdp-attention : Flash Attention (PyTorch 2.0 SDPA), 10~30% 향상
+              # --precision half    : FP16 (VRAM 50% 절감)
+              # 주의: ai-dock 이미지가 --no-half를 기본 추가하므로 --no-half-vae 제거
+              #       (--no-half-vae + --precision half 조합이 충돌)
+              value: "--api --nowebui --xformers --opt-sdp-attention --precision half"
+            - name: CUDA_VISIBLE_DEVICES
+              # replica 2개일 때 각 Pod에 다른 GPU 할당 (환경변수 방식은 수동)
+              # K8s가 nvidia.com/gpu: 1 할당 시 자동으로 격리됨
+              value: "0"
+          resources:
+            requests:
+              cpu: "4"
+              memory: 16Gi
+              nvidia.com/gpu: 1   # SD는 단일 GPU로 서빙 (replica로 확장)
+            limits:
+              cpu: "8"
+              memory: 32Gi
+              nvidia.com/gpu: 1
+          volumeMounts:
+            - name: sd-models
+              mountPath: /opt/stable-diffusion-webui/models
+            - name: shm
+              mountPath: /dev/shm
+          readinessProbe:
+            httpGet:
+              path: /sdapi/v1/sd-models
+              port: 17860
+            initialDelaySeconds: 120   # 모델 다운로드 및 로딩 시간
+            periodSeconds: 15
+            failureThreshold: 40
+          livenessProbe:
+            httpGet:
+              path: /sdapi/v1/memory
+              port: 17860
+            initialDelaySeconds: 180
+            periodSeconds: 30
+            failureThreshold: 3
+          lifecycle:
+            postStart:
+              exec:
+                # Warm-up: torch.compile JIT 트리거 (선택사항)
+                command:
+                  - /bin/sh
+                  - -c
+                  - "sleep 30 && curl -s -X POST http://localhost:7860/sdapi/v1/txt2img -H 'Content-Type: application/json' -d '{\"prompt\":\"warmup\",\"steps\":1,\"width\":64,\"height\":64}' > /dev/null 2>&1 || true"
+      volumes:
+        - name: sd-models
+          persistentVolumeClaim:
+            claimName: sd-model-cache-pvc
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+
+# 이미지 생성 모델 성능 최적화 요약 (상세: docs/sd-optimization.md)
+#
+# [즉시 적용 가능]
+# - xFormers + Flash Attention: WEBUI_FLAGS에 이미 포함
+# - FP16: --precision half로 이미 적용
+#
+# [스텝 수 최적화 - 가장 큰 효과]
+# - DPM++ 2M Karras, 20 steps: DDIM 50 steps 대비 2.5x 빠름
+# - LCM-LoRA 4 steps: LoRA 로드 후 8~12x 빠름
+# - SDXL-Lightning: 4 steps, 12x 빠름 (SDXL base 필요)
+#
+# [캐싱 - A1111 확장]
+# - DeepCache (sd-webui-deepcache): 2~2.5x 추가 속도 향상
+# - Token Merging/ToMe (sd-webui-tome): 20~60% 추가 향상
+#
+# [Multi-GPU 전략]
+# - SD는 Tensor Parallelism 미지원
+# - replicas: 2 + nvidia.com/gpu: 1 per Pod = GPU 0/1 각 독립 서빙 (throughput 2x)
+# - EFS PVC로 전환 시 두 replica가 동일 모델 캐시 공유 가능

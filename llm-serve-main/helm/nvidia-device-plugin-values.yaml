@@ -1,0 +1,10 @@
+# NVIDIA GPU Feature Discovery 활성화 (노드에 GPU 모델 레이블 자동 부착)
+gfd:
+  enabled: true
+
+# 모든 GPU 노드에 DaemonSet으로 배포
+nodeSelector: {}
+
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists

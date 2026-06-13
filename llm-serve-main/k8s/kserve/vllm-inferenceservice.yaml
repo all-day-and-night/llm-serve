@@ -1,0 +1,37 @@
+# KServe InferenceService: vLLM (Qwen2.5-7B-Instruct)
+#
+# raw Deployment/Service 대신 InferenceService 단일 리소스로:
+#   - Deployment + Service + (옵션) Ingress 자동 생성
+#   - storage initializer가 hf:// 에서 모델 자동 다운로드
+#   - 향후 canary/traffic split, autoscale 확장 가능
+#
+# 비교:
+#   k8s/vllm/deployment.yaml  → vLLM을 직접 Deployment로 운영
+#   이 파일                   → KServe InferenceService 추상화 레이어로 운영
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: vllm-qwen
+  namespace: llm-serve
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment  # Knative 없이 표준 Deployment 사용
+spec:
+  predictor:
+    nodeSelector:
+      gpu-node: "true"
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    model:
+      modelFormat:
+        name: vllm
+      runtime: kserve-vllm-gpu2
+      storageUri: hf://Qwen/Qwen2.5-7B-Instruct  # 공개 모델, HF 토큰 불필요
+      # gated 모델(예: meta-llama/...)은 아래 주석 해제
+      # env:
+      #   - name: HUGGING_FACE_HUB_TOKEN
+      #     valueFrom:
+      #       secretKeyRef:
+      #         name: hf-token
+      #         key: HF_TOKEN

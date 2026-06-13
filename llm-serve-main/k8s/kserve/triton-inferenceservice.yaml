@@ -1,0 +1,36 @@
+# KServe InferenceService: Triton Inference Server
+#
+# KServe 내장 kserve-tritonserver ClusterServingRuntime 사용.
+# storageUri pvc://: 기존 triton-model-repository-pvc를 model repository로 마운트.
+#
+# 비교:
+#   k8s/triton/deployment.yaml  → Triton을 직접 Deployment로 운영
+#   이 파일                     → KServe InferenceService로 운영 (v2 protocol 표준화)
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: triton-trtllm
+  namespace: llm-serve
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+spec:
+  predictor:
+    nodeSelector:
+      gpu-node: "true"
+    tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    model:
+      modelFormat:
+        name: triton
+      storageUri: pvc://triton-model-repository-pvc  # k8s/triton/pvc.yaml 생성 필요
+      resources:
+        requests:
+          cpu: "8"
+          memory: 48Gi
+          nvidia.com/gpu: 2
+        limits:
+          cpu: "16"
+          memory: 96Gi
+          nvidia.com/gpu: 2

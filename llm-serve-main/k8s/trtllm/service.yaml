@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: trtllm
+  namespace: llm-serve
+  labels:
+    app: trtllm
+spec:
+  type: ClusterIP
+  selector:
+    app: trtllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

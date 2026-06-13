@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: llm-serve
+  labels:
+    app: vllm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      enableServiceLinks: false
+      nodeSelector:
+        gpu-node: "true"
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      containers:
+        - name: vllm
+          # 고정 버전 사용 권장. latest는 운영 비권장.
+          image: vllm/vllm-openai:v0.6.4
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token
+                  key: HF_TOKEN
+                  optional: true  # Qwen2.5-7B는 토큰 불필요
+            - name: HF_HOME
+              value: /root/.cache/huggingface
+          command:
+            - vllm
+            - serve
+          args:
+            - Qwen/Qwen2.5-7B-Instruct  # 공개 모델, HF 토큰 불필요
+            - --host
+            - "0.0.0.0"
+            - --port
+            - "8000"
+            - --tensor-parallel-size
+            - "2"              # GPU 2개에 모델 분산 (Tensor Parallelism)
+            - --dtype
+            - auto
+            - --gpu-memory-utilization
+            - "0.90"
+            - --max-model-len
+            - "8192"
+          resources:
+            requests:
+              cpu: "8"
+              memory: 32Gi
+              nvidia.com/gpu: 2
+            limits:
+              cpu: "16"
+              memory: 64Gi
+              nvidia.com/gpu: 2
+          volumeMounts:
+            - name: shm
+              mountPath: /dev/shm
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 8Gi   # tensor parallel 프로세스 간 공유 메모리
+        - name: hf-cache
+          emptyDir:
+            sizeLimit: 50Gi
+          # 운영 전환 시: emptyDir → PVC/EFS로 교체하여 Pod 재시작 시 재다운로드 방지
+          # persistentVolumeClaim:
+          #   claimName: hf-cache-pvc

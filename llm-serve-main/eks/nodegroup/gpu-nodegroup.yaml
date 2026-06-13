@@ -1,0 +1,32 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: ai-serving-gpu2-eks
+  region: ap-northeast-2
+
+managedNodeGroups:
+  - name: gpu-g5
+    instanceType: g5.12xlarge   # NVIDIA A10G × 4 (24GB × 4 = 96GB VRAM)
+    minSize: 1
+    maxSize: 1
+    desiredCapacity: 1
+    volumeSize: 300              # 모델 및 컨테이너 이미지 저장 공간
+    volumeType: gp3
+    amiFamily: AmazonLinux2     # GPU 드라이버 포함 EKS 최적화 AMI 자동 선택
+
+    labels:
+      accelerator: nvidia
+      gpu-node: "true"
+
+    tags:
+      Project: llm-serve
+      ManagedBy: eksctl
+      creator: dex.ju
+
+    # taint 미설정: nodeSelector + toleration 조합으로 스케줄링 제어
+    # GPU taint가 필요하면 아래 주석 해제
+    # taints:
+    #   - key: nvidia.com/gpu
+    #     value: "true"
+    #     effect: NoSchedule
